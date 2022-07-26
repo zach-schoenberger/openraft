@@ -31,17 +31,68 @@ impl<T> NodeIdEssential for T where T: Sized
 /// A Raft node's ID.
 ///
 /// A `NodeId` uniquely identifies a node in the Raft cluster.
-#[cfg(feature = "serde")]
-pub trait NodeId: NodeIdEssential + serde::Serialize + for<'a> serde::Deserialize<'a> {}
+#[cfg(all(feature = "rkyv", feature = "serde"))]
+mod node {
+    use rkyv::ser::serializers::AllocSerializer;
 
-#[cfg(feature = "serde")]
-impl<T> NodeId for T where T: NodeIdEssential + serde::Serialize + for<'a> serde::Deserialize<'a> {}
+    use super::NodeIdEssential;
 
+    /// Number of bytes used as the base buffer for rkyv AllocSerializer
+    const ALLOC_SERILIZER_BASE: usize = 1024;
+
+    pub trait NodeId:
+        NodeIdEssential
+        + serde::Serialize
+        + for<'a> serde::Deserialize<'a>
+        + rkyv::Archive
+        + rkyv::Serialize<AllocSerializer<ALLOC_SERILIZER_BASE>>
+    {
+    }
+
+    impl<T> NodeId for T where T: NodeIdEssential
+            + serde::Serialize
+            + for<'a> serde::Deserialize<'a>
+            + rkyv::Archive
+            + rkyv::Serialize<AllocSerializer<ALLOC_SERILIZER_BASE>>
+    {
+    }
+}
+
+#[cfg(feature = "rkyv")]
 #[cfg(not(feature = "serde"))]
-pub trait NodeId: NodeIdEssential {}
+mod node {
+    use rkyv::ser::serializers::AllocSerializer;
 
-#[cfg(not(feature = "serde"))]
-impl<T> NodeId for T where T: NodeIdEssential {}
+    use super::NodeIdEssential;
+
+    /// Number of bytes used as the base buffer for rkyv AllocSerializer
+    const ALLOC_SERILIZER_BASE: usize = 1024;
+
+    pub trait NodeId: NodeIdEssential + rkyv::Archive + rkyv::Serialize<AllocSerializer<ALLOC_SERILIZER_BASE>> {}
+
+    impl<T> NodeId for T where T: NodeIdEssential + rkyv::Archive + rkyv::Serialize<AllocSerializer<ALLOC_SERILIZER_BASE>> {}
+}
+
+#[cfg(feature = "serde")]
+#[cfg(not(feature = "rkyv"))]
+mod node {
+    use super::NodeIdEssential;
+
+    pub trait NodeId: NodeIdEssential + serde::Serialize + for<'a> serde::Deserialize<'a> {}
+
+    impl<T> NodeId for T where T: NodeIdEssential + serde::Serialize + for<'a> serde::Deserialize<'a> {}
+}
+
+#[cfg(not(any(feature = "serde", feature = "rkyv")))]
+mod node {
+    use super::NodeIdEssential;
+
+    pub trait NodeId: NodeIdEssential {}
+
+    impl<T> NodeId for T where T: NodeIdEssential {}
+}
+
+pub use node::NodeId;
 
 /// Additional node information.
 ///
@@ -51,6 +102,7 @@ impl<T> NodeId for T where T: NodeIdEssential {}
 /// An application is also free not to use this storage and implements its own node-id to address mapping.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Deserialize, rkyv::Serialize))]
 pub struct Node {
     pub addr: String,
     /// Other User defined data.
