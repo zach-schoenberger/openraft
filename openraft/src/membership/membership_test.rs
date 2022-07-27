@@ -76,7 +76,7 @@ fn test_membership_with_learners() -> anyhow::Result<()> {
 
         // test learner and membership
         assert_eq!(vec![1], m1_2.voter_ids().collect::<Vec<_>>());
-        assert_eq!(btreeset! {2}, m1_2.learner_ids().collect());
+        assert_eq!(btreeset! {2}, m1_2.learner_ids().collect::<std::collections::BTreeSet<_>>());
 
         assert_eq!(vec![1], m1_23.voter_ids().collect::<Vec<_>>());
         assert_eq!(vec![2, 3], m1_23.learner_ids().collect::<Vec<_>>());
@@ -90,13 +90,13 @@ fn test_membership_with_learners() -> anyhow::Result<()> {
 
         let m = m1_23.add_learner(3, None)?;
         assert_eq!(vec![1], m.voter_ids().collect::<Vec<_>>());
-        assert_eq!(btreeset! {2,3}, m.learner_ids().collect());
+        assert_eq!(btreeset! {2,3}, m.learner_ids().collect::<std::collections::BTreeSet<_>>());
     }
 
     // overlapping members and learners
     {
         let s1_2 = Membership::<u64>::new(vec![btreeset! {1,2,3}, btreeset! {5,6,7}], Some(btreeset! {3,4,5}));
-        let x = s1_2.learner_ids().collect();
+        let x = s1_2.learner_ids().collect::<std::collections::BTreeSet<_>>();
         assert_eq!(btreeset! {4}, x);
     }
 
