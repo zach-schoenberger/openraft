@@ -102,7 +102,7 @@ where C: RaftTypeConfig
     async fn get_log_entries<RB: RangeBounds<u64> + Clone + Debug + Send + Sync>(
         &mut self,
         range: RB,
-    ) -> Result<Vec<Entry<C>>, StorageError<C::NodeId>> {
+    ) -> Result<C::E, StorageError<C::NodeId>> {
         let res = self.try_get_log_entries(range.clone()).await?;
 
         check_range_matches_entries(range, &res)?;
@@ -134,7 +134,7 @@ where C: RaftTypeConfig
     async fn try_get_log_entries<RB: RangeBounds<u64> + Clone + Debug + Send + Sync>(
         &mut self,
         range: RB,
-    ) -> Result<Vec<Entry<C>>, StorageError<C::NodeId>>;
+    ) -> Result<C::E, StorageError<C::NodeId>>;
 }
 
 /// A trait defining the interface for a Raft state machine snapshot subsystem.

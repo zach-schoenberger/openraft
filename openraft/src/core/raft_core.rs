@@ -375,7 +375,7 @@ impl<C: RaftTypeConfig, N: RaftNetworkFactory<C>, S: RaftStorage<C>> RaftCore<C,
             let rpc = AppendEntriesRequest {
                 vote: self.engine.state.vote,
                 prev_log_id: matched,
-                entries: vec![],
+                entries: None,
                 leader_commit: self.engine.state.committed,
             };
 

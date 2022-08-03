@@ -275,27 +275,30 @@ impl<C: RaftTypeConfig, N: RaftNetworkFactory<C>, S: RaftStorage<C>> Replication
             };
 
             let logs = if start == end {
-                vec![]
+                None
             } else {
+                // TODO add the proper logic back in here
                 let logs = self.log_reader.try_get_log_entries(start..end).await?;
-                if !logs.is_empty() && logs[0].log_id.index > prev_log_id.next_index() {
-                    // There is still chance the first log is removed.
-                    // log entry is just deleted after fetching first_log_id.
-                    // Without consecutive logs, we have to retry loading.
-                    continue;
-                }
+                // if !logs.is_empty() && logs[0].log_id.index > prev_log_id.next_index() {
+                //     // There is still chance the first log is removed.
+                //     // log entry is just deleted after fetching first_log_id.
+                //     // Without consecutive logs, we have to retry loading.
+                //     continue;
+                // }
 
-                logs
+                Some(logs)
             };
 
             break (prev_log_id, logs, end < last_log_index);
         };
 
         let conflict = prev_log_id;
-        let matched = if logs.is_empty() {
+        let matched = if logs.is_none() {
             prev_log_id
         } else {
-            Some(logs[logs.len() - 1].log_id)
+            // TODO should be metadata returned by try_get_log_entries
+            prev_log_id
+            // Some(logs[logs.len() - 1].log_id)
         };
 
         // Build the heartbeat frame to be sent to the follower.

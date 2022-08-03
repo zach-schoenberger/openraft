@@ -81,6 +81,9 @@ pub trait RaftTypeConfig:
     /// Application-specific response data returned by the state machine.
     type R: AppDataResponse;
 
+    /// Application-specific request data represented as a list. Default value should be Vec<Entry<C>>
+    type E: AppData;
+
     /// A Raft node's ID.
     type NodeId: NodeId;
 
@@ -989,7 +992,7 @@ pub struct AppendEntriesRequest<C: RaftTypeConfig> {
     ///
     /// This may be empty when the leader is sending heartbeats. Entries
     /// are batched for efficiency.
-    pub entries: Vec<Entry<C>>,
+    pub entries: Option<C::E>,
 
     /// The leader's committed log id.
     pub leader_commit: Option<LogId<C::NodeId>>,

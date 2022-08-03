@@ -200,7 +200,7 @@ impl<C: RaftTypeConfig, T: RaftStorage<C>> RaftLogReader<C> for StoreExt<C, T> {
     async fn try_get_log_entries<RB: RangeBounds<u64> + Clone + Debug + Send + Sync>(
         &mut self,
         range: RB,
-    ) -> Result<Vec<Entry<C>>, StorageError<C::NodeId>> {
+    ) -> Result<C::E, StorageError<C::NodeId>> {
         self.defensive_nonempty_range(range.clone())?;
         self.inner().try_get_log_entries(range).await
     }
@@ -242,7 +242,7 @@ impl<C: RaftTypeConfig, T: RaftStorage<C>> RaftLogReader<C> for LogReaderExt<C, 
     async fn try_get_log_entries<RB: RangeBounds<u64> + Clone + Debug + Send + Sync>(
         &mut self,
         range: RB,
-    ) -> Result<Vec<Entry<C>>, StorageError<C::NodeId>> {
+    ) -> Result<C::E, StorageError<C::NodeId>> {
         self.defensive_nonempty_range(range.clone())?;
         self.inner.try_get_log_entries(range).await
     }
