@@ -69,6 +69,7 @@ pub use crate::membership::MembershipState;
 pub use crate::metrics::RaftMetrics;
 pub use crate::network::RPCTypes;
 pub use crate::network::RaftNetwork;
+pub use crate::network::RaftNetworkDefault;
 pub use crate::network::RaftNetworkFactory;
 pub use crate::node::Node;
 pub use crate::node::NodeId;

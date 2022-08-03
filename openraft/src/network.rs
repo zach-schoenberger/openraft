@@ -44,14 +44,7 @@ impl std::fmt::Display for RPCTypes {
 /// constructed by the [`RaftNetworkFactory`].
 #[async_trait]
 pub trait RaftNetwork<C>: Send + Sync + 'static
-where C: RaftTypeConfig
-{
-    /// Send an AppendEntries RPC to the target Raft node (§5).
-    async fn send_append_entries(
-        &mut self,
-        rpc: AppendEntriesRequest<C>,
-    ) -> Result<AppendEntriesResponse<C::NodeId>, RPCError<C::NodeId, AppendEntriesError<C::NodeId>>>;
-
+where C: RaftTypeConfig {
     /// Send an InstallSnapshot RPC to the target Raft node (§7).
     async fn send_install_snapshot(
         &mut self,
@@ -63,6 +56,30 @@ where C: RaftTypeConfig
         &mut self,
         rpc: VoteRequest<C::NodeId>,
     ) -> Result<VoteResponse<C::NodeId>, RPCError<C::NodeId, VoteError<C::NodeId>>>;
+}
+
+#[async_trait]
+pub trait RaftNetworkDefault<C>: RaftNetwork<C>
+where C: RaftTypeConfig
+{
+    /// Send an AppendEntries RPC to the target Raft node (§5).
+    async fn send_append_entries(
+        &mut self,
+        rpc: AppendEntriesRequest<C>,
+    ) -> Result<AppendEntriesResponse<C::NodeId>, RPCError<C::NodeId, AppendEntriesError<C::NodeId>>>;
+
+}
+
+#[async_trait]
+pub trait RaftNetworkSerialized<C>: RaftNetwork<C>
+where C: RaftTypeConfig
+{
+    /// Send an AppendEntries RPC to the target Raft node (§5).
+    async fn send_append_entries(
+        &mut self,
+        rpc: AppendEntriesRequest<C>,
+    ) -> Result<AppendEntriesResponse<C::NodeId>, RPCError<C::NodeId, AppendEntriesError<C::NodeId>>>;
+
 }
 
 /// A trait defining the interface for a Raft network factory to create connections between cluster members.

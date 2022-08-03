@@ -38,6 +38,7 @@ use crate::Node;
 use crate::NodeId;
 use crate::RPCTypes;
 use crate::RaftNetwork;
+use crate::RaftNetworkDefault;
 use crate::RaftNetworkFactory;
 use crate::RaftStorage;
 use crate::RaftTypeConfig;
@@ -220,6 +221,117 @@ impl<C: RaftTypeConfig, N: RaftNetworkFactory<C>, S: RaftStorage<C>> Replication
         }
     }
 
+    /// max_possible_matched_index is the least index for `prev_log_id` to form a consecutive log sequence
+    #[tracing::instrument(level = "trace", skip_all)]
+    fn check_consecutive(&self, last_purged: Option<LogId<C::NodeId>>) -> Result<(), LackEntry<C::NodeId>> {
+        tracing::debug!(?last_purged, ?self.max_possible_matched_index, "check_consecutive");
+
+        if last_purged.index() > self.max_possible_matched_index {
+            return Err(LackEntry {
+                index: self.max_possible_matched_index,
+                last_purged_log_id: last_purged,
+            });
+        }
+
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    fn set_target_repl_state(&mut self, state: TargetReplState<C::NodeId>) {
+        tracing::debug!(?state, "set_target_repl_state");
+        self.target_repl_state = state;
+    }
+
+    /// Update the `matched` and `max_possible_matched_index`, which both are for tracking
+    /// follower replication(the left and right cursor in a bsearch).
+    /// And also report the matched log id to RaftCore to commit an entry etc.
+    #[tracing::instrument(level = "trace", skip(self))]
+    fn update_matched(&mut self, new_matched: Option<LogId<C::NodeId>>) {
+        tracing::debug!(
+            self.max_possible_matched_index,
+            ?self.matched,
+            ?new_matched, "update_matched");
+
+        if self.max_possible_matched_index < new_matched.index() {
+            self.max_possible_matched_index = new_matched.index();
+        }
+
+        if self.matched < new_matched {
+            self.matched = new_matched;
+
+            tracing::debug!(target=%self.target, matched=?self.matched, "matched updated");
+
+            let _ = self.raft_core_tx.send(RaftMsg::UpdateReplicationMatched {
+                target: self.target,
+                // `self.matched < new_matched` implies new_matched can not be None.
+                // Thus unwrap is safe.
+                result: Ok(self.matched.unwrap()),
+                vote: self.vote,
+            });
+        }
+    }
+
+    /// Perform a check to see if this replication stream is lagging behind far enough that a
+    /// snapshot is warranted.
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(self) fn needs_snapshot(&self) -> bool {
+        match &self.config.snapshot_policy {
+            SnapshotPolicy::LogsSinceLast(threshold) => {
+                let c = self.committed.next_index();
+                let m = self.matched.next_index();
+
+                let needs_snap = c.saturating_sub(m) >= *threshold;
+
+                tracing::trace!("snapshot needed: {}", needs_snap);
+                needs_snap
+            }
+        }
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub async fn try_drain_raft_rx(&mut self) -> Result<(), ReplicationError<C::NodeId>> {
+        tracing::debug!("try_drain_raft_rx");
+
+        for _i in 0..self.config.max_payload_entries {
+            let event_or_nothing = self.repl_rx.recv().now_or_never();
+            let ev_opt = match event_or_nothing {
+                None => {
+                    // no event in self.repl_rx
+                    return Ok(());
+                }
+                Some(x) => x,
+            };
+
+            let event = match ev_opt {
+                None => {
+                    // channel is closed, Leader quited.
+                    return Err(ReplicationError::Closed);
+                }
+                Some(x) => x,
+            };
+
+            self.process_raft_event(event)
+        }
+
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "trace", skip_all)]
+    pub fn process_raft_event(&mut self, event: UpdateReplication<C::NodeId>) {
+        tracing::debug!(event=%event.summary(), "process_raft_event");
+
+        if event.committed > self.committed {
+            self.need_to_replicate = true;
+            self.committed = event.committed;
+        }
+
+        if event.last_log_id.index() > self.matched.index() {
+            self.need_to_replicate = true;
+        }
+    }
+}
+
+impl<C: RaftTypeConfig, N: RaftNetworkFactory<C, Network = dyn RaftNetworkDefault<C>>, S: RaftStorage<C>> ReplicationCore<C, N, S> {
     /// Send an AppendEntries RPC to the target.
     ///
     /// This request will timeout if no response is received within the
@@ -396,115 +508,6 @@ impl<C: RaftTypeConfig, N: RaftNetworkFactory<C>, S: RaftStorage<C>> Replication
 
                 Ok(())
             }
-        }
-    }
-
-    /// max_possible_matched_index is the least index for `prev_log_id` to form a consecutive log sequence
-    #[tracing::instrument(level = "trace", skip_all)]
-    fn check_consecutive(&self, last_purged: Option<LogId<C::NodeId>>) -> Result<(), LackEntry<C::NodeId>> {
-        tracing::debug!(?last_purged, ?self.max_possible_matched_index, "check_consecutive");
-
-        if last_purged.index() > self.max_possible_matched_index {
-            return Err(LackEntry {
-                index: self.max_possible_matched_index,
-                last_purged_log_id: last_purged,
-            });
-        }
-
-        Ok(())
-    }
-
-    #[tracing::instrument(level = "trace", skip(self))]
-    fn set_target_repl_state(&mut self, state: TargetReplState<C::NodeId>) {
-        tracing::debug!(?state, "set_target_repl_state");
-        self.target_repl_state = state;
-    }
-
-    /// Update the `matched` and `max_possible_matched_index`, which both are for tracking
-    /// follower replication(the left and right cursor in a bsearch).
-    /// And also report the matched log id to RaftCore to commit an entry etc.
-    #[tracing::instrument(level = "trace", skip(self))]
-    fn update_matched(&mut self, new_matched: Option<LogId<C::NodeId>>) {
-        tracing::debug!(
-            self.max_possible_matched_index,
-            ?self.matched,
-            ?new_matched, "update_matched");
-
-        if self.max_possible_matched_index < new_matched.index() {
-            self.max_possible_matched_index = new_matched.index();
-        }
-
-        if self.matched < new_matched {
-            self.matched = new_matched;
-
-            tracing::debug!(target=%self.target, matched=?self.matched, "matched updated");
-
-            let _ = self.raft_core_tx.send(RaftMsg::UpdateReplicationMatched {
-                target: self.target,
-                // `self.matched < new_matched` implies new_matched can not be None.
-                // Thus unwrap is safe.
-                result: Ok(self.matched.unwrap()),
-                vote: self.vote,
-            });
-        }
-    }
-
-    /// Perform a check to see if this replication stream is lagging behind far enough that a
-    /// snapshot is warranted.
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(self) fn needs_snapshot(&self) -> bool {
-        match &self.config.snapshot_policy {
-            SnapshotPolicy::LogsSinceLast(threshold) => {
-                let c = self.committed.next_index();
-                let m = self.matched.next_index();
-
-                let needs_snap = c.saturating_sub(m) >= *threshold;
-
-                tracing::trace!("snapshot needed: {}", needs_snap);
-                needs_snap
-            }
-        }
-    }
-
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub async fn try_drain_raft_rx(&mut self) -> Result<(), ReplicationError<C::NodeId>> {
-        tracing::debug!("try_drain_raft_rx");
-
-        for _i in 0..self.config.max_payload_entries {
-            let event_or_nothing = self.repl_rx.recv().now_or_never();
-            let ev_opt = match event_or_nothing {
-                None => {
-                    // no event in self.repl_rx
-                    return Ok(());
-                }
-                Some(x) => x,
-            };
-
-            let event = match ev_opt {
-                None => {
-                    // channel is closed, Leader quited.
-                    return Err(ReplicationError::Closed);
-                }
-                Some(x) => x,
-            };
-
-            self.process_raft_event(event)
-        }
-
-        Ok(())
-    }
-
-    #[tracing::instrument(level = "trace", skip_all)]
-    pub fn process_raft_event(&mut self, event: UpdateReplication<C::NodeId>) {
-        tracing::debug!(event=%event.summary(), "process_raft_event");
-
-        if event.committed > self.committed {
-            self.need_to_replicate = true;
-            self.committed = event.committed;
-        }
-
-        if event.last_log_id.index() > self.matched.index() {
-            self.need_to_replicate = true;
         }
     }
 }
